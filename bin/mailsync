@@ -1,13 +1,9 @@
-#!/usr/bin/env sh
+#!/bin/sh
+
 # Sync mail and give notification if there is new mail.
 
-export PATH=$PATH:/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus
-export DISPLAY=:0.0
-[ -d "$HOME/.local/share/password-store" ] && export PASSWORD_STORE_DIR="$HOME/.local/share/password-store"
-
 # Run only if user logged in (prevent cron errors)
-pgrep -u "$USER" >/dev/null || { echo "$USER not logged in; sync will not run."; exit ;}
+pgrep -u "${USER:=$LOGNAME}" >/dev/null || { echo "$USER not logged in; sync will not run."; exit ;}
 # Run only if not already running in other instance
 pgrep -x mbsync >/dev/null && { echo "mbsync is already running." ; exit ;}
 
@@ -15,11 +11,18 @@ pgrep -x mbsync >/dev/null && { echo "mbsync is already running." ; exit ;}
 ping -q -c 1 1.1.1.1 > /dev/null || { echo "No internet connection detected."; exit ;}
 command -v notify-send >/dev/null || echo "Note that \`libnotify\` or \`libnotify-send\` should be installed for pop-up mail notifications with this script."
 
+# Required to display notifications if run as a cronjob:
+DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus
+export DISPLAY=:0.0
+
+# For individual configurations:
+[ -d "$HOME/.local/share/password-store" ] && export PASSWORD_STORE_DIR="$HOME/.local/share/password-store"
+
 # Settings are different for MacOS (Darwin) systems.
 if [ "$(uname)" = "Darwin" ]; then
     notify() { osascript -e "display notification \"$2 in $1\" with title \"You've got Mail\" subtitle \"Account: $account\"" && sleep 2 ;}
 else
-    notify() { notify-send "mutt-wizard" "📬 $2 new mail(s) in \`$1\` account." ;}
+    notify() { notify-send --app-name="mutt-wizard" "mutt-wizard" "📬 $2 new mail(s) in \`$1\` account." ;}
 fi
 
 # Check account for new mail. Notify if there is new content.
@@ -34,7 +37,7 @@ syncandnotify() {
             # Extract subject and sender from mail.
             from=$(awk '/^From: / && ++n ==1,/^\<.*\>:/' "$file" | perl -CS -MEncode -ne 'print decode("MIME-Header", $_)' | awk '{ $1=""; if (NF>=3)$NF=""; print $0 }' | sed 's/^[[:blank:]]*[\"'\''\<]*//;s/[\"'\''\>]*[[:blank:]]*$//')
             subject=$(awk '/^Subject: / && ++n == 1,/^\<.*\>: / && ++i == 2' "$file" | head -n-1 | perl -CS -MEncode -ne 'print decode("MIME-Header", $_)' | sed 's/^Subject: //' | sed 's/^{[[:blank:]]*[\"'\''\<]*//;s/[\"'\''\>]*[[:blank:]]*$//' | tr -d '\n')
-            notify-send "📧$from:" "$subject" &
+            notify-send --app-name="mutt-wizard" "📧$from:" "$subject" &
         done
     fi
 }
@@ -47,7 +50,7 @@ else
 fi
 
 echo " 🔃" > /tmp/imapsyncicon_"$USER"
-pkill -RTMIN+12 i3blocks >/dev/null 2>&1
+( pkill -RTMIN+12 "${STATUSBAR:-blocks}" >/dev/null 2>&1 ) 2>/dev/null
 
 # Parallelize multiple accounts
 for account in $accounts
@@ -57,7 +60,7 @@ done
 
 wait
 rm -f /tmp/imapsyncicon_"$USER"
-pkill -RTMIN+12 i3blocks >/dev/null 2>&1
+( pkill -RTMIN+12 "${STATUSBAR:-blocks}" >/dev/null 2>&1 ) 2>/dev/null
 
 notmuch new 2>/dev/null
 
